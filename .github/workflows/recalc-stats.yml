@@ -1,0 +1,67 @@
+name: Recalculate NeetCode stats
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "neetcode-progress.json"
+  workflow_dispatch: {}
+
+jobs:
+  recalc:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Count unique solved problems
+        id: count
+        run: |
+          total=0
+          for topic in */ ; do
+            topic="${topic%/}"
+
+            # пропускаем служебные папки
+            case "$topic" in
+              .git|.github) continue ;;
+            esac
+            [ -d "$topic" ] || continue
+
+            # внутри топика каждая ПАПКА = одна решённая задача,
+            # сколько бы файлов (языков / повторных решений) в ней ни лежало
+            count=$(find "$topic" -mindepth 1 -maxdepth 1 -type d | wc -l)
+            total=$((total + count))
+          done
+
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+          echo "Solved problems: $total"
+
+      - name: Update badge JSON
+        run: |
+          SOLVED=${{ steps.count.outputs.total }}
+
+          if [ "$SOLVED" -ge 150 ]; then
+            COLOR="brightgreen"
+          elif [ "$SOLVED" -ge 75 ]; then
+            COLOR="yellow"
+          else
+            COLOR="orange"
+          fi
+
+          cat > neetcode-progress.json <<EOF
+          {
+            "schemaVersion": 1,
+            "label": "NeetCode",
+            "message": "${SOLVED} solved",
+            "color": "${COLOR}"
+          }
+          EOF
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add neetcode-progress.json
+          git diff --staged --quiet || git commit -m "chore: recalc NeetCode stats (${{ steps.count.outputs.total }} solved) [skip ci]"
+          git push
